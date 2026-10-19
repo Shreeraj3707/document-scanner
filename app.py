@@ -8,22 +8,22 @@ import pytesseract
 import img2pdf
 import pyttsx3
 from skimage.metrics import structural_similarity as ssim
+from pyzbar.pyzbar import decode
 from scanner import scan_document
 
 # Configure Tesseract
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # ============================================================
-# Core Image Processing Functions
+# Core Helper Functions
 # ============================================================
-
 def check_quality(img):
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     blur = cv2.Laplacian(gray, cv2.CV_64F).var()
     bright = np.mean(gray)
     msg = []
-    if blur < 50: msg.append("⚠️ Blurry image. Hold steady!")
-    if bright < 60: msg.append("⚠️ Too dark. Use flash.")
+    if blur < 50: msg.append("⚠️ Blurry image.")
+    if bright < 60: msg.append("⚠️ Too dark.")
     return "\n".join(msg) if msg else "✅ Quality is perfect!"
 
 def deskew(img):
@@ -67,48 +67,30 @@ def process_scan(img, mode, progress=gr.Progress()):
     tmp = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
     tmp.close()
     cv2.imwrite(tmp.name, bgr)
+    
     progress(0.3, desc="Scanning and warping...")
     result = scan_document(tmp.name, output_path=None, mode=mode, debug=False)
     os.unlink(tmp.name)
+    
     if len(result.shape) == 2: result = cv2.cvtColor(result, cv2.COLOR_GRAY2RGB)
     else: result = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
+    
     progress(0.7, desc="Deskewing...")
     result = deskew(result)
-    return result, q_msg
-
-def save_pdf(img):
-    if img is None: raise gr.Error("Nothing to save.")
+    
+    # GENERATE PDF INSTANTLY
+    progress(0.9, desc="Generating PDF...")
     os.makedirs("output", exist_ok=True)
-    ts = datetime.now().strftime("%H%M%S")
-    img_p, pdf_p = f"output/scan_{ts}.png", f"output/scan_{ts}.pdf"
-    cv2.imwrite(img_p, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-    with open(pdf_p, "wb") as f: f.write(img2pdf.convert(img_p))
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    img_p = f"output/scan_{ts}.jpg"
+    pdf_p = f"output/scan_{ts}.pdf"
+    
+    cv2.imwrite(img_p, cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
+    with open(pdf_p, "wb") as f:
+        f.write(img2pdf.convert(img_p))
     os.remove(img_p)
-    return pdf_p
-
-# ============================================================
-# Tab 2: Watermarker
-# ============================================================
-def add_watermark(img, text):
-    if img is None or not text: return img
-    out = img.copy()
-    h, w = out.shape[:2]
-    # Create a blank overlay
-    overlay = np.zeros((h, w, 3), dtype=np.uint8)
-    # Put the text in the center
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = max(1, w / 500)
-    thickness = max(2, int(w / 300))
-    text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
-    text_x = (w - text_size[0]) // 2
-    text_y = (h + text_size[1]) // 2
-    cv2.putText(overlay, text, (text_x, text_y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
-    # Rotate overlay
-    M = cv2.getRotationMatrix2D((w//2, h//2), 45, 1.0)
-    overlay = cv2.warpAffine(overlay, M, (w, h))
-    # Blend
-    out = cv2.addWeighted(out, 0.7, overlay, 0.3, 0)
-    return out
+    
+    return img, result, q_msg, pdf_p
 
 # ============================================================
 # Tab 3: OCR & Speech
@@ -144,44 +126,82 @@ def extract_sig(img):
     return cv2.bitwise_not(sig)
 
 # ============================================================
-# Tab 5: Comparator
+# Tab 5: Comparator (SSIM)
 # ============================================================
 def compare_docs(img1, img2):
     if img1 is None or img2 is None: raise gr.Error("Upload both images.")
-    # Resize img2 to match img1
     img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
     gray1 = cv2.cvtColor(img1, cv2.COLOR_RGB2GRAY)
     gray2 = cv2.cvtColor(img2, cv2.COLOR_RGB2GRAY)
     score, diff = ssim(gray1, gray2, full=True)
     diff = (diff * 255).astype("uint8")
-    # Threshold the difference
     thresh = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
-    # Find contours of changes
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     result = img1.copy()
     for c in contours:
-        if cv2.contourArea(c) > 50: # ignore tiny noise
+        if cv2.contourArea(c) > 50:
             x, y, w, h = cv2.boundingRect(c)
             cv2.rectangle(result, (x, y), (x + w, y + h), (255, 0, 0), 2)
     return result, f"Similarity: {score*100:.2f}%"
 
 # ============================================================
-# Tab 6: Privacy Blur (Redaction)
+# Tab 6: Privacy Blur (Text)
 # ============================================================
 def privacy_blur(img):
     if img is None: raise gr.Error("Upload an image.")
     bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    # Detect text using Tesseract bounding boxes
     data = pytesseract.image_to_data(bgr, output_type=pytesseract.Output.DICT)
     out = img.copy()
     for i in range(len(data['text'])):
         if int(data['conf'][i]) > 60 and len(data['text'][i].strip()) > 0:
             (x, y, w, h) = (data['left'][i], data['top'][i], data['width'][i], data['height'][i])
-            # Blur the region
             roi = out[y:y+h, x:x+w]
             if roi.size > 0:
                 out[y:y+h, x:x+w] = cv2.GaussianBlur(roi, (25, 25), 30)
     return out
+
+# ============================================================
+# Tab 7: Fix Orientation
+# ============================================================
+def fix_orientation(img, rotation):
+    if img is None: raise gr.Error("Upload an image.")
+    if rotation == "180 (Upside Down)":
+        return cv2.rotate(img, cv2.ROTATE_180)
+    elif rotation == "90 Clockwise":
+        return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    elif rotation == "90 Counter-Clockwise":
+        return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    elif rotation == "Flip Horizontal":
+        return cv2.flip(img, 1)
+    return img
+
+# ============================================================
+# Tab 8: Barcode / QR Scanner
+# ============================================================
+def scan_barcode(img):
+    if img is None: raise gr.Error("Upload an image.")
+    bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    barcodes = decode(bgr)
+    out = img.copy()
+    text_results = []
+    for barcode in barcodes:
+        (x, y, w, h) = barcode.rect
+        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 0), 3)
+        barcode_data = barcode.data.decode("utf-8")
+        barcode_type = barcode.type
+        text_results.append(f"Type: {barcode_type} | Data: {barcode_data}")
+    if not text_results:
+        return out, "No barcodes or QR codes found."
+    return out, "\n".join(text_results)
+
+# ============================================================
+# Tab 9: AI Auto-Enhance
+# ============================================================
+def auto_enhance(img):
+    if img is None: raise gr.Error("Upload an image.")
+    gaussian = cv2.GaussianBlur(img, (0, 0), 3.0)
+    sharpened = cv2.addWeighted(img, 1.5, gaussian, -0.5, 0)
+    return sharpened
 
 # ============================================================
 # UI & CSS
@@ -195,7 +215,7 @@ footer { display: none !important; }
 """
 
 with gr.Blocks(title="AI Document Suite") as demo:
-    gr.HTML('<div id="title-header"><h1>🚀 Ultimate AI Document Suite</h1><p>Scan • Watermark • OCR • Redact • Compare</p></div>')
+    gr.HTML('<div id="title-header"><h1>🚀 Ultimate AI Document Suite</h1><p>10 Tools for Complete Document Intelligence</p></div>')
 
     with gr.Tabs():
         # --- TAB 1: SMART SCAN ---
@@ -207,22 +227,22 @@ with gr.Blocks(title="AI Document Suite") as demo:
                     mode_rad = gr.Radio(["bw", "color", "magic"], value="bw", label="Scan Mode")
                     scan_btn = gr.Button("Scan & Auto-Deskew", variant="primary", elem_classes="scan-btn")
                 with gr.Column():
-                    out_img = gr.Image(label="Scanned Result", type="numpy", height=400)
-                    pdf_btn = gr.Button("📄 Download PDF", variant="primary")
-                    pdf_out = gr.File(label="PDF", visible=False)
-            scan_btn.click(process_scan, [in_img, mode_rad], [out_img, q_box])
-            pdf_btn.click(save_pdf, out_img, pdf_out).then(lambda: gr.update(visible=True), outputs=pdf_out)
+                    out_img = gr.Image(label="✅ Scanned Result", type="numpy", height=400)
+                    pdf_file = gr.File(label="📥 Click to save your PDF", interactive=False)
+            
+            # Scan button outputs to the images AND the PDF file at the same time!
+            scan_btn.click(process_scan, [in_img, mode_rad], [in_img, out_img, q_box, pdf_file])
 
-        # --- TAB 2: WATERMARKER ---
-        with gr.Tab("🎨 Watermarker"):
+        # --- TAB 2: CREATIVE FILTERS ---
+        with gr.Tab("🎨 Creative Filters"):
             with gr.Row():
                 with gr.Column():
-                    w_in = gr.Image(label="Upload Document", type="numpy")
-                    w_text = gr.Textbox(label="Watermark Text", value="CONFIDENTIAL")
-                    w_btn = gr.Button("Apply Watermark", elem_classes="scan-btn")
+                    f_in = gr.Image(label="Upload Document", type="numpy")
+                    f_type = gr.Dropdown(["Original", "Grayscale", "Vintage", "Blueprint"], value="Vintage", label="Choose Filter")
+                    f_btn = gr.Button("Apply Filter", elem_classes="scan-btn")
                 with gr.Column():
-                    w_out = gr.Image(label="Watermarked Result", type="numpy")
-            w_btn.click(add_watermark, [w_in, w_text], w_out)
+                    f_out = gr.Image(label="Filtered Result", type="numpy")
+            f_btn.click(apply_filter, [f_in, f_type], f_out)
 
         # --- TAB 3: OCR & SPEECH ---
         with gr.Tab("🧠 OCR & Speech"):
@@ -235,20 +255,18 @@ with gr.Blocks(title="AI Document Suite") as demo:
                     o_audio = gr.Audio(label="Audio", type="filepath")
             o_btn.click(do_ocr_and_speech, o_in, [o_text, o_audio])
 
-        # --- TAB 4: PRIVACY BLUR ---
-        with gr.Tab("🛡️ Privacy Blur"):
-            gr.Markdown("Automatically detects and blurs text to hide sensitive information.")
+        # --- TAB 4: SIGNATURE ---
+        with gr.Tab("✍️ Signature"):
             with gr.Row():
                 with gr.Column():
-                    p_in = gr.Image(label="Upload Document", type="numpy")
-                    p_btn = gr.Button("Blur Text (Redact)", elem_classes="scan-btn")
+                    s_in = gr.Image(label="Upload Document", type="numpy")
+                    s_btn = gr.Button("Isolate Signature", elem_classes="scan-btn")
                 with gr.Column():
-                    p_out = gr.Image(label="Redacted Result", type="numpy")
-            p_btn.click(privacy_blur, p_in, p_out)
+                    s_out = gr.Image(label="Extracted", type="numpy")
+            s_btn.click(extract_sig, s_in, s_out)
 
-        # --- TAB 5: COMPARATOR ---
+        # --- TAB 5: COMPARE ---
         with gr.Tab("🔍 Compare Docs"):
-            gr.Markdown("Upload two versions of a document to see what changed.")
             with gr.Row():
                 with gr.Column():
                     c_img1 = gr.Image(label="Original Document", type="numpy")
@@ -259,27 +277,52 @@ with gr.Blocks(title="AI Document Suite") as demo:
                     c_score = gr.Textbox(label="Similarity Score")
             c_btn.click(compare_docs, [c_img1, c_img2], [c_out, c_score])
 
-        # --- TAB 6: SIGNATURES ---
-        with gr.Tab("✍️ Signature Extractor"):
+        # --- TAB 6: PRIVACY BLUR ---
+        with gr.Tab("🛡️ Text Blur"):
             with gr.Row():
                 with gr.Column():
-                    s_in = gr.Image(label="Upload Document", type="numpy")
-                    s_btn = gr.Button("Isolate Signature", elem_classes="scan-btn")
+                    p_in = gr.Image(label="Upload Document", type="numpy")
+                    p_btn = gr.Button("Blur Text", elem_classes="scan-btn")
                 with gr.Column():
-                    s_out = gr.Image(label="Extracted", type="numpy")
-            s_btn.click(extract_sig, s_in, s_out)
+                    p_out = gr.Image(label="Redacted Result", type="numpy")
+            p_btn.click(privacy_blur, p_in, p_out)
 
-        # --- TAB 7: ABOUT ---
+        # --- TAB 7: FIX ORIENTATION ---
+        with gr.Tab("🔄 Fix Orientation"):
+            gr.Markdown("Rotate or flip your document to fix upside-down or sideways scans.")
+            with gr.Row():
+                with gr.Column():
+                    rot_in = gr.Image(label="Upload Document", type="numpy")
+                    rot_type = gr.Radio(["180 (Upside Down)", "90 Clockwise", "90 Counter-Clockwise", "Flip Horizontal"], value="180 (Upside Down)", label="Choose Adjustment")
+                    rot_btn = gr.Button("Apply Fix", elem_classes="scan-btn")
+                with gr.Column():
+                    rot_out = gr.Image(label="Fixed Result", type="numpy")
+            rot_btn.click(fix_orientation, [rot_in, rot_type], rot_out)
+
+        # --- TAB 8: BARCODE SCANNER ---
+        with gr.Tab("📊 Barcode Scanner"):
+            with gr.Row():
+                with gr.Column():
+                    bar_in = gr.Image(label="Upload Barcode/QR", type="numpy")
+                    bar_btn = gr.Button("Scan Code", elem_classes="scan-btn")
+                with gr.Column():
+                    bar_out = gr.Image(label="Detected", type="numpy")
+                    bar_text = gr.Textbox(label="Decoded Data", lines=5)
+            bar_btn.click(scan_barcode, bar_in, [bar_out, bar_text])
+
+        # --- TAB 9: AUTO ENHANCE ---
+        with gr.Tab("✨ Auto Enhance"):
+            with gr.Row():
+                with gr.Column():
+                    en_in = gr.Image(label="Upload Blurry Document", type="numpy")
+                    en_btn = gr.Button("Sharpen Text", elem_classes="scan-btn")
+                with gr.Column():
+                    en_out = gr.Image(label="Crisp Result", type="numpy")
+            en_btn.click(auto_enhance, en_in, en_out)
+
+        # --- TAB 10: INFO ---
         with gr.Tab("ℹ️ Info"):
-            gr.Markdown("""
-            ### The Ultimate Document Suite
-            - **Smart Scan:** Perspective warp + Quality check + Deskewing.
-            - **Watermark:** Add custom text overlays with transparency.
-            - **OCR & Speech:** Tesseract text extraction + pyttsx3 AI voice.
-            - **Privacy Blur:** Uses Tesseract bounding boxes to blur text.
-            - **Comparator:** Structural Similarity (SSIM) to find document changes.
-            - **Signature:** Morphological isolation of ink.
-            """)
+            gr.Markdown("### Welcome to the Ultimate Document Suite!\n\nThis is a 10-tool AI suite built entirely with OpenCV, Tesseract OCR, and Gradio.")
 
 if __name__ == "__main__":
     demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True,
