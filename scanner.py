@@ -4,63 +4,62 @@ import argparse
 import os
 from utils import four_point_transform, resize_image
 
-
 def find_document_contour(image):
-    """Find largest 4-sided contour. Tries multiple thresholds."""
+    """Advanced contour detection with area filtering."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    img_area = image.shape[0] * image.shape[1]
 
+    # 1. Canny with different thresholds
     canny_pairs = [(30, 100), (50, 150), (75, 200), (100, 250)]
-
     for low, high in canny_pairs:
         edged = cv2.Canny(blurred, low, high)
-        kernel = np.ones((3, 3), np.uint8)
+        kernel = np.ones((5, 5), np.uint8)
         edged = cv2.dilate(edged, kernel, iterations=1)
-
-        contours, _ = cv2.findContours(
-            edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
+        contours, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         contours = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
-
+        
         for c in contours:
+            # FILTER: Must be at least 15% of the image size
+            if cv2.contourArea(c) < img_area * 0.15:
+                continue
             peri = cv2.arcLength(c, True)
-            for tol in [0.02, 0.03, 0.05]:
+            for tol in [0.02, 0.03, 0.05, 0.08]:
                 approx = cv2.approxPolyDP(c, tol * peri, True)
                 if len(approx) == 4:
                     return approx
 
+    # 2. Fallback: Adaptive Thresholding
+    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
+    for c in contours:
+        if cv2.contourArea(c) < img_area * 0.15:
+            continue
+        peri = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, 0.05 * peri, True)
+        if len(approx) == 4:
+            return approx
+
     return None
 
-
 def enhance_scan(warped):
-    """Clean B&W output via adaptive threshold."""
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    scanned = cv2.adaptiveThreshold(
-        gray, 255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        blockSize=11,
-        C=2
-    )
+    scanned = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
     return scanned
 
-
 def remove_shadows(image):
-    """Remove shadows while keeping color."""
     rgb_planes = cv2.split(image)
     result_planes = []
     for plane in rgb_planes:
         dilated = cv2.dilate(plane, np.ones((7, 7), np.uint8))
         bg = cv2.medianBlur(dilated, 21)
         diff = 255 - cv2.absdiff(plane, bg)
-        norm = cv2.normalize(diff, None, alpha=0, beta=255,
-                             norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1)
+        norm = cv2.normalize(diff, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1)
         result_planes.append(norm)
     return cv2.merge(result_planes)
 
-
 def scan_document(image_path, output_path=None, mode='bw', debug=False):
-    """Full pipeline."""
     original = cv2.imread(image_path)
     if original is None:
         raise ValueError(f"Could not load image: {image_path}")
@@ -79,27 +78,23 @@ def scan_document(image_path, output_path=None, mode='bw', debug=False):
         debug_img = resized.copy()
         cv2.drawContours(debug_img, [contour], -1, (0, 255, 0), 2)
         cv2.imwrite("output/debug_contour.jpg", debug_img)
-        print("[+] Saved output/debug_contour.jpg")
 
     contour = contour.reshape(4, 2) * ratio
     warped = four_point_transform(original, contour)
 
-    # Enhance based on mode
     if mode == 'bw':
         scanned = enhance_scan(warped)
     elif mode == 'magic':
-        # Magic Color: Keep color but enhance contrast
-        scanned = cv2.detailEnhance(warped, sigma_s=10, sigma_r=0.15)
+        shadow_removed = remove_shadows(warped)
+        scanned = cv2.detailEnhance(shadow_removed, sigma_s=10, sigma_r=0.15)
     else:
         scanned = remove_shadows(warped)
 
     if output_path:
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         cv2.imwrite(output_path, scanned)
-        print(f"[+] Saved scan to: {output_path}")
 
     return scanned
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Document Scanner")
@@ -107,12 +102,5 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="output/scan.jpg")
     parser.add_argument("--mode", choices=['bw', 'color', 'magic'], default='bw')
     parser.add_argument("--debug", action="store_true")
-
     args = parser.parse_args()
-
-    scan_document(
-        image_path=args.input,
-        output_path=args.output,
-        mode=args.mode,
-        debug=args.debug
-    )
+    scan_document(image_path=args.input, output_path=args.output, mode=args.mode, debug=args.debug)
