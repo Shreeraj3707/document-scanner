@@ -6,24 +6,29 @@ from utils import four_point_transform, resize_image
 
 
 def find_document_contour(image):
-    """Find largest 4-sided contour (the document)."""
+    """Find largest 4-sided contour. Tries multiple thresholds."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edged = cv2.Canny(blurred, 75, 200)
 
-    kernel = np.ones((3, 3), np.uint8)
-    edged = cv2.dilate(edged, kernel, iterations=1)
+    canny_pairs = [(30, 100), (50, 150), (75, 200), (100, 250)]
 
-    contours, _ = cv2.findContours(
-        edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
+    for low, high in canny_pairs:
+        edged = cv2.Canny(blurred, low, high)
+        kernel = np.ones((3, 3), np.uint8)
+        edged = cv2.dilate(edged, kernel, iterations=1)
 
-    for c in contours:
-        peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        if len(approx) == 4:
-            return approx
+        contours, _ = cv2.findContours(
+            edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
+
+        for c in contours:
+            peri = cv2.arcLength(c, True)
+            for tol in [0.02, 0.03, 0.05]:
+                approx = cv2.approxPolyDP(c, tol * peri, True)
+                if len(approx) == 4:
+                    return approx
+
     return None
 
 
@@ -79,8 +84,12 @@ def scan_document(image_path, output_path=None, mode='bw', debug=False):
     contour = contour.reshape(4, 2) * ratio
     warped = four_point_transform(original, contour)
 
+    # Enhance based on mode
     if mode == 'bw':
         scanned = enhance_scan(warped)
+    elif mode == 'magic':
+        # Magic Color: Keep color but enhance contrast
+        scanned = cv2.detailEnhance(warped, sigma_s=10, sigma_r=0.15)
     else:
         scanned = remove_shadows(warped)
 
@@ -96,7 +105,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Document Scanner")
     parser.add_argument("input", help="Path to input image")
     parser.add_argument("--output", default="output/scan.jpg")
-    parser.add_argument("--mode", choices=['bw', 'color'], default='bw')
+    parser.add_argument("--mode", choices=['bw', 'color', 'magic'], default='bw')
     parser.add_argument("--debug", action="store_true")
 
     args = parser.parse_args()
