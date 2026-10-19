@@ -42,7 +42,7 @@ def apply_filter(img, filter_type):
     return img
 
 # ============================================================
-# Tab 1: Smart Scan (Optimized)
+# Tab 1: Smart Scan
 # ============================================================
 def process_scan(img, mode, progress=gr.Progress()):
     if img is None: raise gr.Error("Upload an image.")
@@ -60,7 +60,6 @@ def process_scan(img, mode, progress=gr.Progress()):
     else: result = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
     
     progress(1.0, desc="Done!")
-    # We return the image to the UI. The PDF is generated separately now!
     return img, result, q_msg
 
 def generate_pdf(img):
@@ -187,22 +186,69 @@ def auto_enhance(img):
     return sharpened
 
 # ============================================================
-# UI & CSS
+# UI & CSS (Mobile + Desktop Responsive)
 # ============================================================
 CUSTOM_CSS = """
-.gradio-container { max-width: 1200px !important; margin: auto !important; }
-#title-header { text-align: center; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-    color: white; padding: 25px; border-radius: 15px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
-.scan-btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; color: white !important; }
+.gradio-container { 
+    max-width: 1200px !important; 
+    margin: auto !important; 
+    background: #0f172a !important; 
+}
+#project-header {
+    text-align: center;
+    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4338ca 100%);
+    color: white;
+    padding: 40px 20px;
+    border-radius: 20px;
+    margin-bottom: 30px;
+    box-shadow: 0 10px 30px rgba(67, 56, 202, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+#project-header h1 {
+    margin: 0;
+    font-size: 3.2em;
+    font-weight: 800;
+    letter-spacing: -1px;
+    background: linear-gradient(to right, #a78bfa, #f472b6, #38bdf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+#project-header p {
+    margin: 15px 0 0 0;
+    font-size: 1.2em;
+    color: #cbd5e1;
+    font-weight: 400;
+}
+.scan-btn { 
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; 
+    color: white !important; 
+    font-weight: bold !important;
+    border: none !important;
+}
 footer { display: none !important; }
+
+/* 📱 MOBILE RESPONSIVENESS */
+@media (max-width: 768px) {
+    #project-header { padding: 25px 15px; border-radius: 15px; }
+    #project-header h1 { font-size: 2em; }
+    #project-header p { font-size: 0.95em; }
+    .gradio-container { padding: 5px !important; }
+}
 """
 
-with gr.Blocks(title="AI Document Suite") as demo:
-    gr.HTML('<div id="title-header"><h1>🚀 Ultimate AI Document Suite</h1><p>10 Tools for Complete Document Intelligence</p></div>')
+with gr.Blocks(title="SmartDoc AI") as demo:
+    # --- THE NEW HEADER ---
+    gr.HTML('''
+        <div id="project-header">
+            <h1>📄 SmartDoc AI</h1>
+            <p>An Intelligent Document Processing and Analysis Suite</p>
+        </div>
+    ''')
 
     with gr.Tabs():
         # --- TAB 1: SMART SCAN ---
         with gr.Tab("📷 Smart Scan"):
+            # Using gr.Row automatically stacks on mobile and goes side-by-side on desktop
             with gr.Row():
                 with gr.Column():
                     in_img = gr.Image(label="Upload Photo", type="numpy", height=400)
@@ -211,11 +257,9 @@ with gr.Blocks(title="AI Document Suite") as demo:
                     scan_btn = gr.Button("Scan Document", variant="primary", elem_classes="scan-btn")
                 with gr.Column():
                     out_img = gr.Image(label="✅ Scanned Result", type="numpy", height=400)
-                    # Moved PDF to a separate button so scanning is instant
                     pdf_btn = gr.Button("📄 Generate PDF", variant="secondary")
                     pdf_file = gr.File(label="📥 Click to download PDF", interactive=False)
             
-            # Wires the functions
             scan_btn.click(process_scan, [in_img, mode_rad], [in_img, out_img, q_box])
             pdf_btn.click(generate_pdf, inputs=out_img, outputs=pdf_file)
 
@@ -308,9 +352,8 @@ with gr.Blocks(title="AI Document Suite") as demo:
 
         # --- TAB 10: INFO ---
         with gr.Tab("ℹ️ Info"):
-            gr.Markdown("### Welcome to the Ultimate Document Suite!\n\nThis is a 10-tool AI suite built entirely with OpenCV, Tesseract OCR, and Gradio.")
+            gr.Markdown("### Welcome to the SmartDoc AI Suite!\n\nThis is a 10-tool AI suite built entirely with OpenCV, Tesseract OCR, and Gradio.")
 
 if __name__ == "__main__":
-    # Removed share=True for faster local performance
     demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True,
                 theme=gr.themes.Soft(primary_hue="indigo"), css=CUSTOM_CSS)
