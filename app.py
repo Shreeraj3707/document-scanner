@@ -26,22 +26,6 @@ def check_quality(img):
     if bright < 60: msg.append("⚠️ Too dark.")
     return "\n".join(msg) if msg else "✅ Quality is perfect!"
 
-def deskew(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    gray = cv2.bitwise_not(gray)
-    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-    coords = np.column_stack(np.where(thresh > 0))
-    if len(coords) == 0: return img
-    angle = cv2.minAreaRect(coords)[-1]
-    if angle < -45: angle = -(90 + angle)
-    else: angle = -angle
-    if abs(angle) > 0.5:
-        (h, w) = img.shape[:2]
-        center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        return cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-    return img
-
 def apply_filter(img, filter_type):
     if filter_type == "Original": return img
     if filter_type == "Grayscale": return cv2.cvtColor(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
@@ -58,7 +42,7 @@ def apply_filter(img, filter_type):
     return img
 
 # ============================================================
-# Tab 1: Smart Scan
+# Tab 1: Smart Scan (Optimized)
 # ============================================================
 def process_scan(img, mode, progress=gr.Progress()):
     if img is None: raise gr.Error("Upload an image.")
@@ -68,29 +52,28 @@ def process_scan(img, mode, progress=gr.Progress()):
     tmp.close()
     cv2.imwrite(tmp.name, bgr)
     
-    progress(0.3, desc="Scanning and warping...")
+    progress(0.5, desc="Scanning and warping...")
     result = scan_document(tmp.name, output_path=None, mode=mode, debug=False)
     os.unlink(tmp.name)
     
     if len(result.shape) == 2: result = cv2.cvtColor(result, cv2.COLOR_GRAY2RGB)
     else: result = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
     
-    progress(0.7, desc="Deskewing...")
-    result = deskew(result)
-    
-    # GENERATE PDF INSTANTLY
-    progress(0.9, desc="Generating PDF...")
+    progress(1.0, desc="Done!")
+    # We return the image to the UI. The PDF is generated separately now!
+    return img, result, q_msg
+
+def generate_pdf(img):
+    if img is None: raise gr.Error("Please scan an image first.")
     os.makedirs("output", exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     img_p = f"output/scan_{ts}.jpg"
     pdf_p = f"output/scan_{ts}.pdf"
-    
-    cv2.imwrite(img_p, cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
+    cv2.imwrite(img_p, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
     with open(pdf_p, "wb") as f:
         f.write(img2pdf.convert(img_p))
     os.remove(img_p)
-    
-    return img, result, q_msg, pdf_p
+    return pdf_p
 
 # ============================================================
 # Tab 3: OCR & Speech
@@ -225,13 +208,16 @@ with gr.Blocks(title="AI Document Suite") as demo:
                     in_img = gr.Image(label="Upload Photo", type="numpy", height=400)
                     q_box = gr.Textbox(label="Quality Check", interactive=False)
                     mode_rad = gr.Radio(["bw", "color", "magic"], value="bw", label="Scan Mode")
-                    scan_btn = gr.Button("Scan & Auto-Deskew", variant="primary", elem_classes="scan-btn")
+                    scan_btn = gr.Button("Scan Document", variant="primary", elem_classes="scan-btn")
                 with gr.Column():
                     out_img = gr.Image(label="✅ Scanned Result", type="numpy", height=400)
-                    pdf_file = gr.File(label="📥 Click to save your PDF", interactive=False)
+                    # Moved PDF to a separate button so scanning is instant
+                    pdf_btn = gr.Button("📄 Generate PDF", variant="secondary")
+                    pdf_file = gr.File(label="📥 Click to download PDF", interactive=False)
             
-            # Scan button outputs to the images AND the PDF file at the same time!
-            scan_btn.click(process_scan, [in_img, mode_rad], [in_img, out_img, q_box, pdf_file])
+            # Wires the functions
+            scan_btn.click(process_scan, [in_img, mode_rad], [in_img, out_img, q_box])
+            pdf_btn.click(generate_pdf, inputs=out_img, outputs=pdf_file)
 
         # --- TAB 2: CREATIVE FILTERS ---
         with gr.Tab("🎨 Creative Filters"):
@@ -325,5 +311,6 @@ with gr.Blocks(title="AI Document Suite") as demo:
             gr.Markdown("### Welcome to the Ultimate Document Suite!\n\nThis is a 10-tool AI suite built entirely with OpenCV, Tesseract OCR, and Gradio.")
 
 if __name__ == "__main__":
+    # Removed share=True for faster local performance
     demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True,
                 theme=gr.themes.Soft(primary_hue="indigo"), css=CUSTOM_CSS)
