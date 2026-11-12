@@ -11,10 +11,13 @@ from skimage.metrics import structural_similarity as ssim
 from pyzbar.pyzbar import decode
 from scanner import scan_document
 from pypdf import PdfReader, PdfWriter
-import fitz  # PyMuPDF
+import pymupdf as fitz  # Fixed the deprecated warning
 
 # Configure Tesseract for Linux server (Render)
 pytesseract.pytesseract.tesseract_cmd = 'tesseract'
+
+# Ensure the /tmp directory exists for Render
+os.makedirs("/tmp", exist_ok=True)
 
 # ============================================================
 # Core Helper Functions
@@ -248,7 +251,6 @@ with gr.Blocks(title="SmartDoc AI") as demo:
 
     with gr.Tabs():
         
-        # ==================== NEW INSTRUCTIONS TAB ====================
         with gr.Tab("ℹ️ How to Use"):
             gr.Markdown("""
             # 👋 Welcome to SmartDoc AI!
@@ -280,7 +282,6 @@ with gr.Blocks(title="SmartDoc AI") as demo:
             **⚠️ Important Note:** Because this app runs on a free cloud server, if you leave it for a while, the server goes to sleep. If you experience a delay, please wait 30 seconds and click the button again!
             """)
 
-        # ==================== CATEGORY 1: SCANNING ====================
         with gr.Tab("📷 Scanning & Editing"):
             with gr.Tab("Smart Scan"):
                 with gr.Row():
@@ -325,7 +326,6 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         en_out = gr.Image(label="Result", type="numpy")
                 en_btn.click(auto_enhance, en_in, en_out)
 
-        # ==================== CATEGORY 2: EXTRACTION ====================
         with gr.Tab("🧠 Extraction & AI"):
             with gr.Tab("OCR & Speech"):
                 with gr.Row():
@@ -356,7 +356,6 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         bar_text = gr.Textbox(label="Data")
                 bar_btn.click(scan_barcode, bar_in, [bar_out, bar_text])
 
-        # ==================== CATEGORY 3: SECURITY ====================
         with gr.Tab("🛡️ Security & Compare"):
             with gr.Tab("Text Blur (Redaction)"):
                 with gr.Row():
@@ -378,7 +377,6 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         c_score = gr.Textbox(label="Score")
                 c_btn.click(compare_docs, [c_img1, c_img2], [c_out, c_score])
 
-        # ==================== CATEGORY 4: PDF TOOLS ====================
         with gr.Tab("📄 PDF Suite"):
             with gr.Tab("Split PDF"):
                 pdf_in = gr.File(label="Upload PDF")
@@ -406,8 +404,5 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                 rot_pdf_out = gr.File(label="Download")
                 rot_pdf_btn.click(rotate_pdf, [rot_pdf_in, rot_angle], rot_pdf_out)
 
-# ============================================================
-# Launch for Render Web Service
-# ============================================================
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860, theme=gr.themes.Soft(primary_hue="indigo"), css=CUSTOM_CSS)
