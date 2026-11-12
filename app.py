@@ -13,7 +13,7 @@ from scanner import scan_document
 from pypdf import PdfReader, PdfWriter
 import fitz  # PyMuPDF
 
-# Configure Tesseract for Linux server
+# Configure Tesseract for Linux server (Render)
 pytesseract.pytesseract.tesseract_cmd = 'tesseract'
 
 # ============================================================
@@ -247,6 +247,40 @@ with gr.Blocks(title="SmartDoc AI") as demo:
     ''')
 
     with gr.Tabs():
+        
+        # ==================== NEW INSTRUCTIONS TAB ====================
+        with gr.Tab("ℹ️ How to Use"):
+            gr.Markdown("""
+            # 👋 Welcome to SmartDoc AI!
+            This suite has **16 powerful tools** to scan, edit, secure, and manage your documents. 
+            Here is a quick guide on how to use each category:
+
+            ### 📷 1. Scanning & Editing
+            *   **Smart Scan:** Upload a photo of any document (a receipt, ID card, or notebook) taken from an angle. The AI will automatically find the corners, flatten it, and turn it into a clean scan. Choose `bw` (Black & White) for text, or `color` to keep the original look. You can then click **Generate PDF** to download it.
+            *   **Creative Filters:** Turn your document into a Vintage style, Grayscale, or Blueprint.
+            *   **Fix Orientation:** If your photo is upside-down or sideways, use this to rotate or flip it.
+            *   **Auto Enhance:** Make blurry or faded text sharp and readable again.
+
+            ### 🧠 2. Extraction & AI
+            *   **OCR & Speech:** Upload a document. The AI will read the text and you can even click Play to have it read aloud to you!
+            *   **Signature Isolator:** Upload a document with a signature. The AI will use morphological math to extract just the pen ink, removing the printed text and paper.
+            *   **Barcode Scanner:** Upload a photo of any QR code or barcode to instantly read the hidden data.
+
+            ### 🛡️ 3. Security & Compare
+            *   **Text Blur (Redaction):** Need to hide private info like a name or phone number? Upload the image and this tool will automatically blur the text!
+            *   **Compare Documents:** Upload two versions of the same document. It will highlight the exact differences in red boxes.
+
+            ### 📄 4. PDF Suite
+            *   **Split PDF:** Upload a large PDF and extract just one page.
+            *   **Merge PDFs:** Upload 2 or 3 PDFs and combine them into one single file.
+            *   **Compress PDF:** Upload a heavy PDF. This tool uses real image compression to drastically reduce the file size (up to 80% smaller!) so you can email it easily.
+            *   **Rotate PDF:** Rotate all pages of a PDF to the correct direction.
+
+            ---
+            **⚠️ Important Note:** Because this app runs on a free cloud server, if you leave it for a while, the server goes to sleep. If you experience a delay, please wait 30 seconds and click the button again!
+            """)
+
+        # ==================== CATEGORY 1: SCANNING ====================
         with gr.Tab("📷 Scanning & Editing"):
             with gr.Tab("Smart Scan"):
                 with gr.Row():
@@ -261,6 +295,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         pdf_file = gr.File(label="📥 Download PDF")
                 scan_btn.click(process_scan, [in_img, mode_rad], [in_img, out_img, q_box])
                 pdf_btn.click(generate_pdf, out_img, pdf_file)
+            
             with gr.Tab("Creative Filters"):
                 with gr.Row():
                     with gr.Column():
@@ -270,6 +305,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                     with gr.Column():
                         f_out = gr.Image(label="Result", type="numpy")
                 f_btn.click(apply_filter, [f_in, f_type], f_out)
+            
             with gr.Tab("Fix Orientation"):
                 with gr.Row():
                     with gr.Column():
@@ -279,6 +315,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                     with gr.Column():
                         rot_out = gr.Image(label="Result", type="numpy")
                 rot_btn.click(fix_orientation, [rot_in, rot_type], rot_out)
+            
             with gr.Tab("Auto Enhance"):
                 with gr.Row():
                     with gr.Column():
@@ -288,6 +325,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         en_out = gr.Image(label="Result", type="numpy")
                 en_btn.click(auto_enhance, en_in, en_out)
 
+        # ==================== CATEGORY 2: EXTRACTION ====================
         with gr.Tab("🧠 Extraction & AI"):
             with gr.Tab("OCR & Speech"):
                 with gr.Row():
@@ -298,6 +336,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         o_text = gr.Textbox(label="Text", lines=10)
                         o_audio = gr.Audio(label="Audio", type="filepath")
                 o_btn.click(do_ocr_and_speech, o_in, [o_text, o_audio])
+            
             with gr.Tab("Signature Isolator"):
                 with gr.Row():
                     with gr.Column():
@@ -306,6 +345,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                     with gr.Column():
                         s_out = gr.Image(label="Result", type="numpy")
                 s_btn.click(extract_sig, s_in, s_out)
+            
             with gr.Tab("Barcode Scanner"):
                 with gr.Row():
                     with gr.Column():
@@ -316,6 +356,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         bar_text = gr.Textbox(label="Data")
                 bar_btn.click(scan_barcode, bar_in, [bar_out, bar_text])
 
+        # ==================== CATEGORY 3: SECURITY ====================
         with gr.Tab("🛡️ Security & Compare"):
             with gr.Tab("Text Blur (Redaction)"):
                 with gr.Row():
@@ -325,6 +366,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                     with gr.Column():
                         p_out = gr.Image(label="Result", type="numpy")
                 p_btn.click(privacy_blur, p_in, p_out)
+            
             with gr.Tab("Compare Documents"):
                 with gr.Row():
                     with gr.Column():
@@ -336,6 +378,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         c_score = gr.Textbox(label="Score")
                 c_btn.click(compare_docs, [c_img1, c_img2], [c_out, c_score])
 
+        # ==================== CATEGORY 4: PDF TOOLS ====================
         with gr.Tab("📄 PDF Suite"):
             with gr.Tab("Split PDF"):
                 pdf_in = gr.File(label="Upload PDF")
@@ -343,16 +386,19 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                 split_btn = gr.Button("Extract", elem_classes="scan-btn")
                 split_out = gr.File(label="Download")
                 split_btn.click(split_pdf, [pdf_in, page_num], split_out)
+            
             with gr.Tab("Merge PDFs"):
                 merge_in = gr.File(label="Upload Multiple PDFs", file_count="multiple", file_types=[".pdf"], height=200)
                 merge_btn = gr.Button("Merge PDFs", elem_classes="scan-btn")
                 merge_out = gr.File(label="Download Merged PDF")
                 merge_btn.click(merge_pdfs, inputs=merge_in, outputs=merge_out)
+            
             with gr.Tab("Compress PDF"):
                 comp_in = gr.File(label="Upload PDF")
                 comp_btn = gr.Button("Compress (Real Size Reduction)", elem_classes="scan-btn")
                 comp_out = gr.File(label="Download")
                 comp_btn.click(compress_pdf, comp_in, comp_out)
+            
             with gr.Tab("Rotate PDF"):
                 rot_pdf_in = gr.File(label="Upload PDF")
                 rot_angle = gr.Radio(["90", "180", "270"], value="90", label="Angle")
