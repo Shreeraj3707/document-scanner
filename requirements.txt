@@ -1,5 +1,12 @@
-opencv-python
+opencv-python-headless
 numpy
 pillow
 gradio
 matplotlib
+pytesseract
+img2pdf
+pyttsx3
+scikit-image
+pypdf
+pymupdf
+pyzbar
