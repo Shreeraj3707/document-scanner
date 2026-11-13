@@ -11,7 +11,7 @@ from skimage.metrics import structural_similarity as ssim
 from pyzbar.pyzbar import decode
 from scanner import scan_document
 from pypdf import PdfReader, PdfWriter
-import pymupdf as fitz  # Fixed the deprecated warning
+import pymupdf as fitz
 
 # Configure Tesseract for Linux server (Render)
 pytesseract.pytesseract.tesseract_cmd = 'tesseract'
@@ -251,6 +251,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
 
     with gr.Tabs():
         
+        # ==================== TAB 1: INSTRUCTIONS ====================
         with gr.Tab("ℹ️ How to Use"):
             gr.Markdown("""
             # 👋 Welcome to SmartDoc AI!
@@ -282,6 +283,46 @@ with gr.Blocks(title="SmartDoc AI") as demo:
             **⚠️ Important Note:** Because this app runs on a free cloud server, if you leave it for a while, the server goes to sleep. If you experience a delay, please wait 30 seconds and click the button again!
             """)
 
+        # ==================== TAB 2: ARCHITECTURE ====================
+        with gr.Tab("🧠 Architecture & Data Flow"):
+            gr.Markdown("""
+            # ⚙️ System Architecture & Data Flow
+            
+            Here is a technical breakdown of how SmartDoc AI processes your data under the hood.
+
+            ### 📷 1. Smart Document Scanner (The Pipeline)
+            When you upload a photo, it goes through a 6-step Computer Vision pipeline:
+            1. **Grayscale Conversion:** The image is converted to a single channel to reduce complexity.
+            2. **Gaussian Blur:** Removes high-frequency noise so the edges are cleaner.
+            3. **Canny Edge Detection:** Finds the boundaries of the document by detecting sudden changes in pixel intensity.
+            4. **Contour Mapping:** `cv2.findContours` finds the largest 4-point polygon. We filter out small areas to ignore text boxes and focus on the page.
+            5. **Homography (Perspective Warp):** A 3x3 matrix is calculated to flatten the angled photo into a top-down view.
+            6. **Adaptive Thresholding:** Instead of a global threshold, it calculates the threshold for small regions. This handles shadows and uneven lighting perfectly.
+
+            ### 🧠 2. OCR & Speech (AI Extraction)
+            *   **OCR:** We use Google's **Tesseract Engine**. The scanned image is fed into the LSTM (Long Short-Term Memory) neural network, which extracts characters and outputs a string.
+            *   **Text-to-Speech:** The text is passed to `pyttsx3`, which uses the system's native voice synthesizer to generate an audio file (MP3).
+
+            ### 🛡️ 3. Security & Comparison
+            *   **Privacy Blur (Redaction):** Tesseract's `image_to_data` returns a dictionary of bounding boxes (x, y, width, height) for every detected word. We iterate through these boxes and apply a heavy **Gaussian Blur** kernel only over those specific regions.
+            *   **Document Compare (SSIM):** Two images are compared using the **Structural Similarity Index Measure (SSIM)**. It compares luminance, contrast, and structure. The result is a difference map where black means "identical" and white means "changed". We then draw red rectangles over areas with high difference.
+
+            ### ✍️ 4. Signature Extraction (Morphology)
+            Signatures are thicker than printed text. We use **Morphological Operations**:
+            *   First, a binary threshold is applied.
+            *   Then, **Erosion** removes thin printed lines (they disappear).
+            *   Then, **Dilation** restores the thick pen strokes.
+            *   The result is a clean image of only the handwritten ink.
+
+            ### 📄 5. PDF Suite (File Processing)
+            *   **Merge/Split:** Uses `pypdf` to read the raw PDF structure, copy the page objects, and write them into a new file.
+            *   **Compression:** Uses `PyMuPDF`. It renders every page as a high-res image, compresses that image to a 30% quality JPEG using OpenCV, and rebuilds a brand-new PDF. This is why a 5MB PDF shrinks to 500KB!
+
+            ---
+            **👨‍💻 Built with:** Python, OpenCV, Tesseract OCR, PyMuPDF, PyZbar, Gradio, and deployed via Docker on Render.
+            """)
+
+        # ==================== CATEGORY 1: SCANNING ====================
         with gr.Tab("📷 Scanning & Editing"):
             with gr.Tab("Smart Scan"):
                 with gr.Row():
@@ -326,6 +367,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         en_out = gr.Image(label="Result", type="numpy")
                 en_btn.click(auto_enhance, en_in, en_out)
 
+        # ==================== CATEGORY 2: EXTRACTION ====================
         with gr.Tab("🧠 Extraction & AI"):
             with gr.Tab("OCR & Speech"):
                 with gr.Row():
@@ -356,6 +398,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         bar_text = gr.Textbox(label="Data")
                 bar_btn.click(scan_barcode, bar_in, [bar_out, bar_text])
 
+        # ==================== CATEGORY 3: SECURITY ====================
         with gr.Tab("🛡️ Security & Compare"):
             with gr.Tab("Text Blur (Redaction)"):
                 with gr.Row():
@@ -377,6 +420,7 @@ with gr.Blocks(title="SmartDoc AI") as demo:
                         c_score = gr.Textbox(label="Score")
                 c_btn.click(compare_docs, [c_img1, c_img2], [c_out, c_score])
 
+        # ==================== CATEGORY 4: PDF TOOLS ====================
         with gr.Tab("📄 PDF Suite"):
             with gr.Tab("Split PDF"):
                 pdf_in = gr.File(label="Upload PDF")
