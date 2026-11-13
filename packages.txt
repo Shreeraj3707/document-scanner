@@ -1,2 +1,5 @@
 tesseract-ocr
+tesseract-ocr-eng
 libzbar0
+espeak
+ffmpeg

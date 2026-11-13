@@ -10,3 +10,4 @@ scikit-image
 pypdf
 pymupdf
 pyzbar
+gTTS
